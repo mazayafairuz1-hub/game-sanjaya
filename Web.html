@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ular Mangga</title>
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#f3efe0; --ink:#1f2a1c; --board:#e4dcc0; --grid:#d8cfae;
+  --snake:#2f7d4f; --head:#1d5a36; --fruit:#e8a317; --accent:#c4491c; --btn:#fffaf0;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#14201a; --ink:#f1ecd6; --board:#1d2d24; --grid:#243829;
+    --snake:#5cc687; --head:#9be8b6; --fruit:#ffc43d; --accent:#ff8a5c; --btn:#22372b;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#14201a; --ink:#f1ecd6; --board:#1d2d24; --grid:#243829;
+  --snake:#5cc687; --head:#9be8b6; --fruit:#ffc43d; --accent:#ff8a5c; --btn:#22372b;
+  color-scheme:dark;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Fredoka","Trebuchet MS","Segoe UI",system-ui,sans-serif;
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  padding:16px 12px 24px;touch-action:manipulation;
+}
+h1{font-size:clamp(1.8rem,6vw,2.4rem);margin:4px 0 2px;letter-spacing:.5px}
+.sub{margin:0 0 12px;opacity:.75;font-size:.95rem;text-align:center}
+.bar{display:flex;gap:10px;width:min(92vw,420px);margin-bottom:10px}
+.stat{flex:1;background:var(--board);border-radius:12px;padding:6px 12px;display:flex;justify-content:space-between;align-items:baseline}
+.stat b{font-size:1.4rem;color:var(--accent)}
+.wrap{position:relative;width:min(92vw,420px);aspect-ratio:1}
+canvas{width:100%;height:100%;display:block;background:var(--board);border-radius:14px;border:3px solid var(--ink)}
+.overlay{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:10px;background:color-mix(in srgb,var(--bg) 82%,transparent);border-radius:14px;text-align:center;padding:16px;
+}
+.overlay.hide{display:none}
+.overlay h2{margin:0;font-size:1.6rem}
+.overlay p{margin:0;max-width:30ch}
+button{
+  font:inherit;font-weight:600;color:var(--ink);background:var(--btn);
+  border:2px solid var(--ink);border-radius:12px;padding:10px 22px;cursor:pointer;
+}
+button.primary{background:var(--fruit);color:#1f2a1c}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button:active{transform:translateY(1px)}
+.pad{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(2,56px);gap:8px;margin-top:16px}
+.pad button{padding:0;font-size:1.4rem}
+.pad .up{grid-column:2}
+.pad .left{grid-column:1;grid-row:2}
+.pad .down{grid-column:2;grid-row:2}
+.pad .right{grid-column:3;grid-row:2}
+.hint{margin-top:12px;font-size:.85rem;opacity:.7;text-align:center}
+</style>
+</head>
+<body>
+<h1>Ular Makan Mangga</h1>
+<p class="sub">Makan mangga, jangan menabrak dinding atau badanmu sendiri.</p>
+
+<div class="bar">
+  <div class="stat"><span>Skor</span><b id="score">0</b></div>
+  <div class="stat"><span>Rekor</span><b id="best">0</b></div>
+</div>
+
+<div class="wrap">
+  <canvas id="c" width="400" height="400" aria-label="Papan permainan"></canvas>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">Siap main?</h2>
+    <p id="ovText">Gunakan tombol panah atau WASD. Di ponsel, geser jari atau pakai tombol di bawah.</p>
+    <button class="primary" id="startBtn">Mulai main</button>
+  </div>
+</div>
+
+<div class="pad" aria-label="Kontrol arah">
+  <button class="up" data-d="U" aria-label="Atas">▲</button>
+  <button class="left" data-d="L" aria-label="Kiri">◀</button>
+  <button class="down" data-d="D" aria-label="Bawah">▼</button>
+  <button class="right" data-d="R" aria-label="Kanan">▶</button>
+</div>
+<p class="hint">Spasi untuk jeda. Setiap 5 mangga, ular bergerak lebih cepat.</p>
+
+<script>
+(function(){
+  var N=20, S=20;
+  var cv=document.getElementById('c'), ctx=cv.getContext('2d');
+  var elScore=document.getElementById('score'), elBest=document.getElementById('best');
+  var ov=document.getElementById('ov'), ovTitle=document.getElementById('ovTitle'), ovText=document.getElementById('ovText');
+  var startBtn=document.getElementById('startBtn');
+  var DIRS={U:[0,-1],D:[0,1],L:[-1,0],R:[1,0]};
+  var snake,dir,nextDir,fruit,score,best=0,timer,running=false,paused=false,speed;
+
+  try{best=parseInt(localStorage.getItem('ularManggaBest'),10)||0}catch(e){}
+  elBest.textContent=best;
+
+  function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
+
+  function reset(){
+    snake=[[10,10],[9,10],[8,10]];
+    dir='R';nextDir='R';score=0;speed=140;
+    elScore.textContent=0;
+    placeFruit();
+  }
+  function placeFruit(){
+    var free=[];
+    for(var x=0;x<N;x++)for(var y=0;y<N;y++){
+      if(!snake.some(function(s){return s[0]===x&&s[1]===y}))free.push([x,y]);
+    }
+    fruit=free[Math.floor(Math.random()*free.length)];
+  }
+  function start(){
+    reset();running=true;paused=false;
+    ov.classList.add('hide');
+    schedule();draw();
+  }
+  function schedule(){clearInterval(timer);timer=setInterval(tick,speed)}
+  function setDir(d){
+    var cur=DIRS[dir],n=DIRS[d];
+    if(cur[0]+n[0]===0&&cur[1]+n[1]===0)return;
+    nextDir=d;
+  }
+  function tick(){
+    if(!running||paused)return;
+    dir=nextDir;
+    var d=DIRS[dir],h=snake[0],nx=h[0]+d[0],ny=h[1]+d[1];
+    var eat=fruit&&nx===fruit[0]&&ny===fruit[1];
+    var body=eat?snake:snake.slice(0,-1);
+    if(nx<0||ny<0||nx>=N||ny>=N||body.some(function(s){return s[0]===nx&&s[1]===ny})){return over()}
+    snake.unshift([nx,ny]);
+    if(eat){
+      score++;elScore.textContent=score;
+      if(score%5===0&&speed>60){speed-=12;schedule()}
+      if(snake.length>=N*N)return over(true);
+      placeFruit();
+    }else snake.pop();
+    draw();
+  }
+  function over(win){
+    running=false;clearInterval(timer);
+    if(score>best){
+      best=score;elBest.textContent=best;
+      try{localStorage.setItem('ularManggaBest',String(best))}catch(e){}
+    }
+    ovTitle.textContent=win?'Kamu menang!':'Permainan selesai';
+    ovText.textContent='Skor kamu '+score+' mangga. Rekor tertinggi: '+best+'.';
+    startBtn.textContent='Main lagi';
+    ov.classList.remove('hide');
+    draw();
+  }
+  function draw(){
+    ctx.clearRect(0,0,400,400);
+    ctx.strokeStyle=css('--grid');ctx.lineWidth=1;
+    for(var i=1;i<N;i++){
+      ctx.beginPath();ctx.moveTo(i*S,0);ctx.lineTo(i*S,400);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(0,i*S);ctx.lineTo(400,i*S);ctx.stroke();
+    }
+    if(!snake)return;
+    if(fruit){
+      ctx.fillStyle=css('--fruit');
+      ctx.beginPath();ctx.ellipse(fruit[0]*S+S/2,fruit[1]*S+S/2+1,S/2-2,S/2-3,-0.5,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=css('--snake');
+      ctx.fillRect(fruit[0]*S+S/2,fruit[1]*S+1,3,4);
+    }
+    snake.forEach(function(s,i){
+      ctx.fillStyle=i===0?css('--head'):css('--snake');
+      var r=i===0?6:5;
+      rr(s[0]*S+1,s[1]*S+1,S-2,S-2,r);
+    });
+    var h=snake[0],d=DIRS[dir];
+    ctx.fillStyle=css('--bg');
+    var ex=h[0]*S+S/2,ey=h[1]*S+S/2,px=-d[1]*4,py=d[0]*4;
+    ctx.beginPath();ctx.arc(ex+d[0]*3+px,ey+d[1]*3+py,2.2,0,7);ctx.arc(ex+d[0]*3-px,ey+d[1]*3-py,2.2,0,7);ctx.fill();
+  }
+  function rr(x,y,w,h,r){
+    ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();ctx.fill();
+  }
+  function togglePause(){
+    if(!running)return;
+    paused=!paused;
+    if(paused){
+      ovTitle.textContent='Dijeda';ovText.textContent='Tekan spasi atau tombol di bawah untuk lanjut.';
+      startBtn.textContent='Lanjutkan';ov.classList.remove('hide');
+    }else ov.classList.add('hide');
+  }
+
+  startBtn.addEventListener('click',function(){
+    if(running&&paused)togglePause();else start();
+  });
+  document.addEventListener('keydown',function(e){
+    var k=e.key,m={ArrowUp:'U',w:'U',W:'U',ArrowDown:'D',s:'D',S:'D',ArrowLeft:'L',a:'L',A:'L',ArrowRight:'R',d:'R',D:'R'};
+    if(m[k]){e.preventDefault();if(!running&&!paused&&ov.classList.contains('hide')===false&&false)return;setDir(m[k])}
+    else if(k===' '){e.preventDefault();if(running)togglePause();else start()}
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.pad button'),function(b){
+    b.addEventListener('click',function(){setDir(b.getAttribute('data-d'))});
+  });
+  var tx,ty;
+  cv.addEventListener('touchstart',function(e){tx=e.touches[0].clientX;ty=e.touches[0].clientY},{passive:true});
+  cv.addEventListener('touchmove',function(e){e.preventDefault()},{passive:false});
+  cv.addEventListener('touchend',function(e){
+    if(tx==null)return;
+    var dx=e.changedTouches[0].clientX-tx,dy=e.changedTouches[0].clientY-ty;
+    if(Math.max(Math.abs(dx),Math.abs(dy))<20)return;
+    if(Math.abs(dx)>Math.abs(dy))setDir(dx>0?'R':'L');else setDir(dy>0?'D':'U');
+    tx=null;
+  },{passive:true});
+  window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',draw);
+  reset();draw();
+})();
+</script>
+</body>
+</html>
